@@ -24,9 +24,15 @@
     <ClCompile Include="cfl_main.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="skeleton.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="cfl_data.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="knapsack.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

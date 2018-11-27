@@ -117,10 +117,12 @@
   <ItemGroup>
     <ClCompile Include="basics.cpp" />
     <ClCompile Include="cfl_main.cpp" />
+    <ClCompile Include="skeleton.cpp" />
     <ClCompile Include="Source.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="cfl_data.h" />
+    <ClInclude Include="knapsack.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="cfl.dat" />
