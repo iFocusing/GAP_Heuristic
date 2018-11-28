@@ -116,7 +116,6 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="basics.cpp" />
-    <ClCompile Include="cfl_main.cpp" />
     <ClCompile Include="skeleton.cpp" />
     <ClCompile Include="Source.cpp" />
   </ItemGroup>

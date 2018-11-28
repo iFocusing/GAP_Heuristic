@@ -45,7 +45,7 @@ public:
 	
 	//   NOTE2: It is assumed that all input customer profits and weigths are positive 
 
-	bool solve(int Q, int ncustomers, std::vector<double> profits, std::vector<int> demands) {
+	bool solve(int Q, int ncustomers, std::vector<double> profits, std::vector<double> demands) {
 
 		solutionCost = 0;
 		solutionOpt = false;
@@ -118,3 +118,4 @@ public:
 
 // If all goes well, after the call to kp.solve() the knapsack solution will be stored in the internal vector kp.solution
 // The number of items in the optimal solution is stored in the internal variable kp.n_in_solution
+
