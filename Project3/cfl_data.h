@@ -62,20 +62,24 @@
 				PlantCapa.resize(nPlants);
 				CustCosts.resize(nCustom, std::vector<double>(nPlants));
 
+				
 			//  Read customer demands
 				for (int i = 0; i < nCustom; ++i) {
 					input >> CustDeman[i];
 					CustDeman[i] = std::floor(CustDeman[i]);
 				}
+				
 			//  Read facility capacities
 				for (int j = 0; j < nPlants; ++j) {
 					input >> PlantCapa[j];
 					PlantCapa[j] = std::floor(PlantCapa[j]);
 				}
+				
 			//  Read customer facility open costs
 				for (int j = 0; j < nPlants; ++j) {
 					input >> OpenCosts[j];
 				}
+				
 			//  Read customer service costs
 				for (int j = 0; j < nPlants; ++j) {
 					for (int i = 0; i < nCustom; i++) {

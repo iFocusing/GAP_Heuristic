@@ -46,7 +46,6 @@ public:
 	//   NOTE2: It is assumed that all input customer profits and weigths are positive 
 
 	bool solve(int Q, int ncustomers, std::vector<double> profits, std::vector<double> demands) {
-
 		solutionCost = 0;
 		solutionOpt = false;
 		n_in_solution = 0;

@@ -124,7 +124,21 @@
     <ClInclude Include="knapsack.h" />
   </ItemGroup>
   <ItemGroup>
+    <None Include="80-400-1.dat" />
+    <None Include="80-400-5.dat" />
+    <None Include="cap61.dat" />
+    <None Include="cap74.dat" />
     <None Include="cfl.dat" />
+    <None Include="i1000_1.dat" />
+    <None Include="i1000_10.dat" />
+    <None Include="i1000_20.dat" />
+    <None Include="i700_1.dat" />
+    <None Include="i700_10.dat" />
+    <None Include="i700_20.dat" />
+    <None Include="p2000-2000-89a.dat" />
+    <None Include="p2000-2000-89b.dat" />
+    <None Include="p57.dat" />
+    <None Include="p58.dat" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
