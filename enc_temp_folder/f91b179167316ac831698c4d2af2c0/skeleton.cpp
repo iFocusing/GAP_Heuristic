@@ -54,9 +54,10 @@ void heuristic(cfldata &cfl, vector<vector<int>> &x, vector<bool> &OpenPlant, ve
 	// GAP heuristic or Lagrangean repair heuristic
 	repaire(cfl, x, OpenPlant, residualCapacity, Custom, sortCustCosts);
 	gapheu(cfl, OpenPlant, sol);
+	
 }
 
-void repaire(cfldata &cfl, vector<vector<int>> &x, vector<bool> &OpenPlant, vector<double> &residualCapacity, vector<bool> &Custom, vector<sorter<double>> sortCustCosts, cflsol sol){
+void repaire(cfldata &cfl, vector<vector<int>> &x, vector<bool> &OpenPlant, vector<double> &residualCapacity, vector<bool> &Custom, vector<sorter<double>> sortCustCosts){
 	cout << "Do repaire heuristic:" << endl;
 	// following is step 1,2 in the lecture;
 	for (int i = 0; i < cfl.nCustom; i++) {
