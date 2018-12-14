@@ -4,40 +4,40 @@
 #include "cfl_data.h"
 #include "knapsack.h"
 #include "time.h"
+#include <iomanip>
 
 using namespace std;
 /************************************************************************************************************************************
 	Function prototype
 *************************************************************************************************************************************/
 // this line makes this function visible to the rest of the file.
-bool isfeasible(vector<bool> &OpenPlant, vector<vector<int>> x, cfldata &cfl, cflsol &sol);
-void heuristic(cfldata &cfl, vector<vector<int>> &x, vector<bool> &OpenPlant, vector<double> &residualCapacity, vector<bool> &Custom, vector<sorter<double>> sortCustCosts, cflsol &sol);;
-void repaire(cfldata &cfl, vector<vector<int>> &x, vector<bool> &OpenPlant, vector<double> &residualCapacity, vector<bool> &Custom, vector<sorter<double>> sortCustCosts);
+bool isfeasible(vector<vector<int>> &x, cfldata &cfl, cflsol &sol);
+void heuristic(cfldata &cfl, vector<vector<int>> &x, vector<bool> &OpenPlant, vector<sorter<double>> sortCustCosts, cflsol &sol);;
+void repaire(cfldata &cfl, vector<vector<int>> &x, vector<bool> &OpenPlant, vector<sorter<double>> sortCustCosts, cflsol &sol);
 void gapheu(cfldata &cfl, vector<bool> &OpenPlant, cflsol &sol);
 void Lagrangean_solver(cfldata &cfl, cflsol &sol_star, int MAX_t, int number, int updaterule);
-void gapheu_qq(cfldata &cfl, vector<int> &OpenPlant, cflsol &sol);
+void repair1(cfldata &cfl, vector<int> &OpenPlant, vector<vector<int>> &assigment, cflsol &sol);
 
 #define INFINITY DBL_MAX
 
 // Folowing isfeasible function is to check if the solution after doing sub_problem
 // (i.e. after doing kp for all facilities)
-bool isfeasible(vector<bool> &OpenPlant, vector<vector<int>> x, cfldata &cfl, cflsol &sol) {
-	bool isfea = false;
+
+bool isfeasible(vector<vector<int>> &x, cfldata &cfl, cflsol &sol) {
+	vector<int> cusPlant(cfl.nCustom, -1);
 	for (int i = 0; i < cfl.nCustom; i++) {
-		int isassigned = 0;
 		for (int j = 0; j < cfl.nPlants; j++) {
-			if (x[i][j] = 1) {
-				isassigned += 1;
-				sol.CusPlant[i] = j;
+			if (x[i][j] == 1 && cusPlant[i] == -1) {
+				cusPlant[i] = j;
+			}
+			else if (x[i][j] == 1 && cusPlant[i] != -1) {
+				vector<int>().swap(cusPlant);
+				return false;
 			}
 		}
-		if (isassigned == 1) {
-			isfea = true;
-		}
-		else {
-			return false;
-		}
+		if (cusPlant[i] == -1) return false;
 	}
+	sol.CusPlant = cusPlant;
 	return sol.testfeas(cfl);
 }
 
@@ -49,32 +49,169 @@ bool isfeasible(vector<bool> &OpenPlant, vector<vector<int>> x, cfldata &cfl, cf
 //		its cost ub, if one is found
 // *****************************************************************************************************************************************
 
-void heuristic(cfldata &cfl, vector<vector<int>> &x, vector<bool> &OpenPlant, vector<double> &residualCapacity, vector<bool> &Custom, vector<sorter<double>> sortCustCosts, cflsol &sol){
+void heuristic(cfldata &cfl, vector<vector<int>> &x, vector<bool> &OpenPlant, vector<sorter<double>> sortCustCosts, cflsol &sol){
 	// see lecture slides 03_cfl.pdf
 	// GAP heuristic or Lagrangean repair heuristic
-	repaire(cfl, x, OpenPlant, residualCapacity, Custom, sortCustCosts);
-	gapheu(cfl, OpenPlant, sol);
+	
+	vector<int> OpenPlant_qq(cfl.nPlants);
+	for (int j = 0; j < cfl.nPlants; j++) {
+		if (OpenPlant[j]) {
+			OpenPlant_qq[j] = 1;
+		}
+		else {
+			OpenPlant_qq[j] = 0;
+		}
+	}
+
+	repair1(cfl, OpenPlant_qq, x, sol);
+	
+	for (int j = 0; j < cfl.nPlants; j++) {
+		if (OpenPlant_qq[j] == 1) {
+			OpenPlant[j] = true;
+		}
+		else {
+			OpenPlant[j] = false;
+		}
+	}
+	
+	// Following repair has something wrong in it, I cannot find the error.
+	// repaire(cfl, x, OpenPlant, sortCustCosts, sol);
+	
+	if (sol.testfeas(cfl)) {
+		gapheu(cfl, OpenPlant, sol);
+	}
+	//gapheu(cfl, OpenPlant, sol);
 }
 
-void repaire(cfldata &cfl, vector<vector<int>> &x, vector<bool> &OpenPlant, vector<double> &residualCapacity, vector<bool> &Custom, vector<sorter<double>> sortCustCosts, cflsol sol){
-	cout << "Do repaire heuristic:" << endl;
+
+vector<double> sumCumMultiPlant(cfldata &cfl, vector<vector<int>> &assigment) {
+	vector<double> xu(cfl.nCustom, 0.0);
+	for (int i = 0; i < cfl.nCustom; i++) {
+		for (int j = 0; j < cfl.nPlants; j++) {
+			if (assigment[i][j] == 1) {
+				xu[i] += 1;
+			}
+		}
+	}
+	return xu;
+}
+
+void repair1(cfldata &cfl, vector<int> &OpenPlant, vector<vector<int>> &assigment, cflsol &sol) {
+	vector<double> resiCap(cfl.nPlants, 0);
+	vector<int> used(cfl.nPlants, 0);
+	vector<double> sum = sumCumMultiPlant(cfl, assigment);
+	vector<int> cusPlant(cfl.nCustom, -1);
+	double cost = 0.0;
+	for (int i = 0; i < cfl.nPlants; i++) {
+		resiCap[i] = cfl.PlantCapa[i];
+	}
+
+	for (int i = 0; i < cfl.nCustom; i++) {
+		// step one
+		if (sum[i] == 1) {
+			for (int j = 0; j < cfl.nPlants; j++) {
+				if (assigment[i][j] == 1) {
+					cusPlant[i] = j;
+					resiCap[j] -= cfl.CustDeman[i];
+					if (used[j] == 0)  used[j] = 1;
+					break;
+				}
+			}
+
+			// step two 
+		}
+		else if (sum[i] > 1) {
+			int jOpt = -1;
+			double minCost = DBL_MAX;
+			for (int j = 0; j < cfl.nPlants; j++) {
+				if (assigment[i][j] == 1 && cfl.CustCosts[i][j] < minCost) {
+					minCost = cfl.CustCosts[i][j];
+					jOpt = j;
+				}
+			}
+			cusPlant[i] = jOpt;
+			resiCap[jOpt] -= cfl.CustDeman[i];
+			if (used[jOpt] == 0) used[jOpt] = 1;
+		}
+	}
+
+	// step three	
+	sorter<double> sort;
+	sort.sortperm(cfl.CustDeman, 'l');
+	for (int ii = 0; ii < cfl.nCustom; ii++) {
+		int i = sort.perm[ii];
+		if (cusPlant[i] == -1) {
+			int jOpt = -1;
+			double minCost = DBL_MAX;
+			for (int j = 0; j < cfl.nPlants; j++) {
+				if (resiCap[j] >= cfl.CustDeman[i] && used[j] == 1 && cfl.CustCosts[i][j] < minCost) {
+					minCost = cfl.CustCosts[i][j];
+					jOpt = j;
+				}
+			}
+			if (jOpt != -1) {
+				cusPlant[i] = jOpt;
+				resiCap[jOpt] -= cfl.CustDeman[i];
+			}
+			else {
+				double minCost = DBL_MAX;
+				for (int j = 0; j < cfl.nPlants; j++) {
+					if (resiCap[j] >= cfl.CustDeman[i] && used[j] == 0
+						&& cfl.OpenCosts[j] + cfl.CustCosts[i][j] < minCost) {
+						jOpt = j;
+						minCost = (int)cfl.CustCosts[i][j];
+					}
+				}
+				if (jOpt != -1) {
+					cusPlant[i] = jOpt;
+					resiCap[jOpt] -= cfl.CustDeman[i];
+					if (used[jOpt] == 0) {
+						used[jOpt] = 1;
+					}
+					else {
+						sol.feas = false;
+						break;
+					}
+				}
+			}
+
+		}
+	}
+	OpenPlant = used;
+	sol.CusPlant = cusPlant;
+	sol.testfeas(cfl);
+}
+
+
+
+
+void repaire(cfldata &cfl, vector<vector<int>> &x, vector<bool> &OpenPlant, vector<sorter<double>> sortCustCosts, cflsol &sol){
+	std::cout << "Do repaire heuristic:" << endl;
 	// following is step 1,2 in the lecture;
+
+	vector<double> residualCapacity(cfl.nPlants, 0);
+	// initial residualCapacity
+	for (int j = 0; j < cfl.nPlants; j++) {
+		residualCapacity[j] = cfl.PlantCapa[j];
+	}
+	// initial Custom
+	vector<bool> Custom(cfl.nCustom, false);
+	vector<bool> Open(cfl.nPlants, false);
+
 	for (int i = 0; i < cfl.nCustom; i++) {
 		int n = 0;
-		int bestj;
+		int bestj = -1;
 		for (int j = 0; j < cfl.nPlants; j++) {
 			if (x[i][j] == 1) {
 				n++;
 				if (n > 1) {
 					if (cfl.CustCosts[i][bestj] > cfl.CustCosts[i][j]) {
 						x[i][bestj] = 0;
-						residualCapacity[bestj] -= cfl.CustDeman[i];
 						bestj = j;
 						x[i][bestj] = 1;
 					}
 					else {
 						x[i][j] = 0;
-						residualCapacity[j] -= cfl.CustDeman[i];
 					}
 				}
 				else {
@@ -83,122 +220,101 @@ void repaire(cfldata &cfl, vector<vector<int>> &x, vector<bool> &OpenPlant, vect
 			}
 		}
 	}
-	// modifyOpenPlant after doing step1, 2;
-	for (int j = 0; j < cfl.nPlants; j++) {
-		bool openOrNot = false;
-		if (OpenPlant[j]) {
-			for (int i = 0; i < cfl.nCustom; i++) {
-				if (x[i][j] == 1) {
-					openOrNot = true;
-				}
+
+	for (int i = 0; i < cfl.nCustom; i++) {
+		for (int j = 0; j < cfl.nPlants; j++) {
+			if (x[i][j] == 1) {
+				Custom[i] = true;
+				residualCapacity[j] -= cfl.CustDeman[i];
+				Open[j] = true;
+				sol.CusPlant[i] = j;
 			}
 		}
-		OpenPlant[j] = openOrNot;
 	}
+
+	std::cout  << "below two lines are assigned custon: "<<endl;
+	for (int i = 0; i < cfl.nCustom; i++) {
+		if (Custom[i]) {
+			std::cout << i << " ";
+		}
+	}
+	std::cout << "" << endl;
+	for (int i = 0; i < cfl.nCustom; i++) {
+		for (int j = 0; j < cfl.nPlants; j++) {
+			if (x[i][j] == 1) {
+				Custom[i] = true;
+				break;
+			}
+		}
+	}
+	for (int i = 0; i < cfl.nCustom; i++) {
+		if (Custom[i]) {
+			std::cout << i << " ";
+		}
+	}
+	std::cout << "" << endl;
 	// function kprepair does step 3 in the lecture;
-	sorter<double> sortOpenCosts;
-	sortOpenCosts.sortperm(cfl.OpenCosts, 'l');
+	sorter<double> sortCost;
+	vector<double> opencostcuscost(cfl.nPlants);
+	sorter<double> sortCusDemand;
+	sortCusDemand.sortperm(cfl.CustDeman, 'l');
+
 	for (int i = 0; i < cfl.nCustom; i++) {
 		bool tem = false;
-		if (!Custom[i])
-			sortCustCosts[i].sortperm(cfl.CustCosts[i], 'l');//Sort serve cost of customer i for increasing opening cost;
-		for (int j = 0; j < cfl.nPlants; j++) {
-			if (OpenPlant[sortCustCosts[i].perm[j]] && residualCapacity[sortCustCosts[i].perm[j]] >= cfl.CustDeman[i] && !tem) {
-				x[i][sortCustCosts[i].perm[j]] = 1;
-				residualCapacity[sortCustCosts[i].perm[j]] -= cfl.CustDeman[i];
-				Custom[i] = true;
-				tem = true;
-				break;
+		if (!Custom[sortCusDemand.perm[i]]) {
+			for (int j = 0; j < cfl.nPlants; j++) {
+				if (Open[sortCustCosts[sortCusDemand.perm[i]].perm[j]]
+					&& residualCapacity[sortCustCosts[sortCusDemand.perm[i]].perm[j]] >= cfl.CustDeman[sortCusDemand.perm[i]]
+					&& !tem) {
+					x[sortCusDemand.perm[i]][sortCustCosts[sortCusDemand.perm[i]].perm[j]] = 1;
+					sol.CusPlant[sortCusDemand.perm[i]] = sortCustCosts[sortCusDemand.perm[i]].perm[j];
+					residualCapacity[sortCustCosts[sortCusDemand.perm[i]].perm[j]] -= cfl.CustDeman[sortCusDemand.perm[i]];
+					Custom[sortCusDemand.perm[i]] = true;
+					tem = true;
+					break;
+				}
 			}
 		}
 		if (!tem) {
 			for (int j = 0; j < cfl.nPlants; j++) {
-				if (!OpenPlant[sortOpenCosts.perm[j]]) {
-					OpenPlant[sortOpenCosts.perm[j]] = true;
-					x[i][sortOpenCosts.perm[j]] = 1;
-					residualCapacity[sortOpenCosts.perm[j]] -= cfl.CustDeman[i];
-					Custom[i] = true;
+				opencostcuscost[j] = cfl.CustCosts[sortCusDemand.perm[i]][j] + cfl.OpenCosts[j];
+			}
+			sortCost.sortperm(opencostcuscost, 'l');
+			for (int j = 0; j < cfl.nPlants; j++) {
+				if (!Open[sortCost.perm[j]] && residualCapacity[sortCost.perm[j]] >= cfl.CustDeman[sortCusDemand.perm[i]]) {
+					Open[sortCost.perm[j]] = true;
+					x[sortCusDemand.perm[i]][sortCost.perm[j]] = 1;
+					sol.CusPlant[sortCusDemand.perm[i]] = sortCost.perm[j];
+					residualCapacity[sortCost.perm[j]] -= cfl.CustDeman[sortCusDemand.perm[i]];
+					Custom[sortCusDemand.perm[i]] = true;
 					break;
 				}
 			}
 		}
 	}
+	std::cout << "after steps 3 assigned custon: " << endl;
+	for (int i = 0; i < cfl.nCustom; i++) {
+		if (Custom[i]) {
+			std::cout << i << " ";
+		}
+	}
+	std::cout << "" << endl;
+	std::cout << "after repiar x, x:";
+	for (int i = 0; i < cfl.nCustom; i++) {
+		for (int j = 0; j < cfl.nPlants; j++) {
+			std::cout << x[i][j] << " ";
+		}
+		std::cout << "" << std::endl;
+	}
+	std::cout << "" << std::endl;
+	OpenPlant = Open;
 }
 
 // A function that executes the GAP heuristic using the subset of open facilities 
 // found by repaire heristic or else.
 
-
-void gapheu_qq(cfldata &cfl, vector<int> &OpenPlant, cflsol &sol) {
-	vector<double> resiCap(cfl.nPlants, 0);
-	vector<vector<int>> sortF(cfl.nCustom, vector<int>(cfl.nPlants));
-
-	vector<int> cusPlant(cfl.nCustom, -1);
-	vector<double> U(cfl.nCustom);
-	bool feas = true;
-	vector<int> F;
-
-	for (int j = 0; j < cfl.nPlants; j++) {
-		if (OpenPlant[j] == 1) {
-			resiCap[j] = cfl.PlantCapa[j];
-		}
-	}
-
-	sorter<double> sort;
-	for (int i = 0; i < cfl.nCustom; i++) {
-		U[i] = i;
-		sort.sortperm(cfl.CustCosts[i], 'l');
-		sortF[i] = sort.perm;
-	}
-
-	while (!U.empty() && feas) {
-		// step2.a
-		double delta_star = DBL_MIN;
-		double j_star = -1;
-		double i_star = -1;
-		for (int i = 0; i < U.size(); i++) {
-			vector<int>().swap(F);
-			int j1 = -1;
-			int j2 = -1;
-			double delta = DBL_MAX;
-			for (int j = 0; j < cfl.nPlants; j++) {
-				if (resiCap[sortF[U[i]][j]] >= cfl.CustDeman[U[i]]) {
-					F.push_back(sortF[U[i]][j]);
-				}
-			}
-			if (F.size() == 0) {
-				sol.feas = false;
-				return;
-			}
-			else if (F.size() == 1) {
-				j1 = F[0];
-			}
-			else {
-				j1 = F[0];
-				j2 = F[1];
-
-				delta = cfl.CustCosts[U[i]][j2] - cfl.CustCosts[U[i]][j1];
-			}
-			if (delta > delta_star) {
-				delta_star = delta;
-				j_star = j1;
-				i_star = i;
-			}
-		}
-		cusPlant[U[i_star]] = j_star;
-		resiCap[j_star] -= cfl.CustDeman[U[i_star]];
-		vector<double>::iterator it = U.begin() + i_star;
-		U.erase(it);
-
-	}
-	sol.CusPlant = cusPlant;
-	sol.testfeas(cfl);
-}
-
-
-
 void gapheu(cfldata &cfl, vector<bool> &OpenPlant, cflsol &sol) {
-	cout << "Do GAP heuristic:" << endl;
+	std::cout << "Do GAP heuristic:" << endl;
 	bool feas = true;
 	vector<double> Qbar(cfl.nPlants);
 	for (int j = 0; j < cfl.nPlants; j++) {
@@ -296,10 +412,10 @@ void Lagrangean_solver(cfldata &cfl, cflsol &sol_star, int MAX_t, int number, in
 
 	// Set the scaling factor alpha for the step size, e.g., alpha. 
 	// If using the step update rule 1 then theta = lambda 
-	double alpha = 0.999;            // update rule 1, should try [0.5,0.999]
+	double alpha = 0.995;            // update rule 1, should try [0.5,0.999]
 	double theta = 2.0;			  // update rule 1, should try [1.0,2.0]
 	double lambda = 2.0;
-	double epsilon = 0.0000002;
+	double epsilon = 0.0002;
 
 	// Compute a trivial upper bound ub: Sum of all opening costs plus the sum over i of the largest c_(ij) 
 	vector<sorter<double>> sortCustCosts(cfl.nCustom);
@@ -307,11 +423,14 @@ void Lagrangean_solver(cfldata &cfl, cflsol &sol_star, int MAX_t, int number, in
 		sortCustCosts[i].sortperm(cfl.CustCosts[i], 'l');		//Sort serve cost of customer i for increasing opening cost;
 		z_ub[t] = z_ub[t] + cfl.CustCosts[i][sortCustCosts[i].perm[cfl.nPlants-1]];
 	}
-	z_ub[t] = z_ub[t] + accumulate(cfl.OpenCosts.begin(), cfl.OpenCosts.end(), 0);
+	for (int j = 0; j < cfl.nPlants; j++) {
+		z_ub[t] = z_ub[t] + cfl.OpenCosts[j];
+	}
+	
 	if (z_ub[t] < z_ub_star) {
 		z_ub_star = z_ub[t];
 	}
-	cout << "trivial z_ub_star:"<< z_ub_star << endl;
+	std::cout << "trivial z_ub_star:"<< z_ub_star << endl;
 	
 	//  MAIN LOOP OF SUBGRADIENT ALGO:
 	sorter<double> sortPlantCapa;
@@ -320,17 +439,12 @@ void Lagrangean_solver(cfldata &cfl, cflsol &sol_star, int MAX_t, int number, in
 	vector<vector<int>> x(cfl.nCustom, vector<int>(cfl.nPlants, 0));
 	vector<bool> OpenPlant(cfl.nPlants, false); // compute the OpenPlant
 	vector<bool> Custom(cfl.nCustom, false);
-	vector<double> residualCapacity(cfl.nPlants, 0);
-
-	vector<int> indexCustoKp;  // eg. custom 2,4,6 into kp 
-	vector<double> CustDemantoKp; // 0, 1, 2 --- 2,4,6
-	vector<double> profite; // 0, 1, 2 --- 2,4,6
 
 	while (t < MAX_t && theta > epsilon)
 	{
 		// For each facility j: do kp; 
 		// At the same time construct solution x[i][j], compute the 'OpenPlant', 'Custom', 'residualCapacity' and partial LB[t] (i.e. partial totalModifiedCost) 
-		cout << "--------------Start: Information printed from iteration:" << t << "-----------------------" << endl;
+		std::cout << "--------------Start: Information printed from iteration:" << t << "-----------------------" << endl;
 		// initial x
 		for (int i = 0; i < cfl.nCustom; i++) {
 			for (int j = 0; j < cfl.nPlants; j++) {
@@ -341,14 +455,7 @@ void Lagrangean_solver(cfldata &cfl, cflsol &sol_star, int MAX_t, int number, in
 		for (int j = 0; j < cfl.nPlants; j++) {
 				OpenPlant[j] = false;
 		}
-		// initial Custom
-		for (int i = 0; i < cfl.nCustom; i++) {
-			Custom[i] = false;
-		}
-		// initial residualCapacity
-		for (int j = 0; j < cfl.nPlants; j++) {
-			residualCapacity[j] = cfl.PlantCapa[j];
-		}
+	
 		double totalModifiedCost = 0;
 		cflsol sol_t(cfl);
 		sol.push_back(sol_t); // the i-th iteration solution
@@ -366,11 +473,14 @@ void Lagrangean_solver(cfldata &cfl, cflsol &sol_star, int MAX_t, int number, in
 			*/
 			double pro;
 			int nCustoKp = 0;
+			vector<int> indexCustoKp;  // eg. custom 2,4,6 into kp 
+			vector<double> CustDemantoKp; // 0, 1, 2 --- 2,4,6
+			vector<double> profite; // 0, 1, 2 --- 2,4,6
 			for (int k = 0; k < cfl.nCustom; k++) {
 				pro = -(cfl.CustCosts[k][j] - u[t][k]);
 				if (pro > 0) {
 					nCustoKp++;
-					indexCustoKp.push_back(k);
+					indexCustoKp.push_back(k); 
 					profite.push_back(pro);
 					CustDemantoKp.push_back(cfl.CustDeman[k]);
 				}
@@ -379,50 +489,50 @@ void Lagrangean_solver(cfldata &cfl, cflsol &sol_star, int MAX_t, int number, in
 				kp.solve(cfl.PlantCapa[j], nCustoKp, profite, CustDemantoKp);
 				if (kp.solutionOpt && cfl.OpenCosts[j] - kp.solutionCost < 0) {
 					totalModifiedCost = totalModifiedCost + cfl.OpenCosts[j] - kp.solutionCost;
+					
 					OpenPlant[j] = true;
 					for (int i = 0; i < kp.n_in_solution; i++) {
 						//cout <<" kp.solution[i] indexCustoKp[kp.solution[i]]"<< kp.solution[i] << indexCustoKp[kp.solution[i]] << endl;
 						x[indexCustoKp[kp.solution[i]]][j] = 1;
-						Custom[indexCustoKp[i]] = true;
-						residualCapacity[j] -= cfl.CustDeman[indexCustoKp[kp.solution[i]]];
 					}
 				}
 			}
 			else {
 				//cout << "Not do kp for this facility " << j <<", all profites are non-positive!" << endl;
 			}
-
-			indexCustoKp.clear();
-			CustDemantoKp.clear();
-			profite.clear();
 		}
 		// End Loop -- For each facility j: do kp
 
 		// If the x is feasible, can return, it should also be the optimal.
-		if (isfeasible(OpenPlant, x, cfl, sol[t])) {
-			LB[t] = totalModifiedCost + accumulate(u[t].begin(), u[t].end(), 0);
-			LB_star = LB[t];
+		if (isfeasible(x, cfl, sol[t])) {
+			LB[t] = sol[t].cost;
+			LB_star = sol[t].cost;
 			z_ub_star = sol[t].cost;
 			break;
 		}
 		// Compute the subgradient s using the solution x(u). For each i, s_i is 1 minus the sum over j of x(u)_ij
 		vector<double> s(cfl.nCustom);
 		for (int i = 0; i < cfl.nCustom; i++) {
-			s[i] = 1 - accumulate(x[i].begin(), x[i].end(), 0);
+			double accum = 0;
+			for (int j = 0; j < cfl.nPlants; j++) {
+				accum += x[i][j];
+			}
+			s[i] = 1 - accum;
 		}
 		
 		// Compute L(u) as the sum over j of min[0, f(j) - z(j)] plus the sum of all Lagrangean multipliers u_i. Here, f(j) denotes the opening cost of 
 		// facility j and z(j) is the optimal cost of the j-th knapsack problem
-		LB[t] = totalModifiedCost + accumulate(u[t].begin(), u[t].end(), 0);
-
+		for (int i = 0; i < cfl.nCustom; i++) {
+			totalModifiedCost += u[t][i];
+		}
+		LB[t] = totalModifiedCost;
 		// Call function HEURISTIC to execute the Lagrangean Heuristic: If a feasible solution is found and its cost is better than the best primal bound 
 		// ub, update the best primal bound ub and store the solution
 
 		//kprepair(cfl, x, OpenPlant, residualCapacity, Custom, sortCustCosts);
-		heuristic(cfl, x, OpenPlant, residualCapacity, Custom, sortCustCosts, sol[t]);
+		heuristic(cfl, x, OpenPlant,sortCustCosts, sol[t]);
 		sol[t].testfeas(cfl);
 		if (sol[t].feas && sol[t].cost < z_ub_star) {
-			cout << "after herustic solution is feasible?" << sol[t].feas << endl;
 			z_ub_star = sol[t].cost;
 			sol_star = sol[t];
 		}
@@ -431,6 +541,7 @@ void Lagrangean_solver(cfldata &cfl, cflsol &sol_star, int MAX_t, int number, in
 		//	* update the best dual bound
 		//	* store the current Lagrangean multipliers u in the vector u* of best Lagrangean multipliers
 		// Endif 
+
 		if (LB[t] > LB_star) {
 			LB_star = LB[t];
 			u_star = u[t];
@@ -465,21 +576,19 @@ void Lagrangean_solver(cfldata &cfl, cflsol &sol_star, int MAX_t, int number, in
 			double S = 0.0;
 			for (int i = 0; i < s.size(); i++) {
 				S = S + s[i] * s[i];
+				
 			}
 			theta = lambda * (z_ub_star - LB[t]) / S;
 		}
 
 		//  Update each Lagrangean multipliers: u(i) := u(i) + theta * s(i) for each customer i
+		std::cout << "theat[" << t << "]:" << theta << endl;
 		for (int i = 0; i < cfl.nCustom; i++) {
 			u[t+1][i] = u[t][i] + theta * s[i];
-			//cout << u[t+1][i] << " ******************* ";
 		}
-		cout << "--------------End: Information printed from iteration:" << t << "-----------------------" << endl;
+		std::cout << "z_ub[" << t<<"]:" << z_ub[t] << " LB[" << t <<"]:" << LB[t] << endl;
 		t = t + 1;
-
-		cout << "theta:" << theta << endl;
-		cout << "z_ub_star: " << z_ub_star << " LB_star: " << LB_star  << endl;
-
+		std::cout << "z_ub_star:" << z_ub_star << " LB_star:" << LB_star << endl;
 		// 	Terminate the loop if 
 		//	* a max number of iterations have been done
 		//	* theta is smaller than an epsilon (e.g., 0.0002)
@@ -488,30 +597,22 @@ void Lagrangean_solver(cfldata &cfl, cflsol &sol_star, int MAX_t, int number, in
 	}
 	
 	//  Return the best primal and dual bound, the best feasible solution, the vector u*, the total execution time
-	cout << "-------------------Start: Information printed from main function-----------------------------" << endl;
-	cout << "z_ub_star: " << z_ub_star << " LB_star: " << LB_star << endl;
-	cout << "" << endl;
-	cout << "-------------------------------------------" << endl;
+	std::cout << "-------------------Start: Information printed from main function-----------------------------" << endl;
+	std::cout << "z_ub_star: "<< setprecision(8) << z_ub_star << " LB_star: " << setprecision(8) << LB_star << endl;
+	std::cout << "" << endl;
+	std::cout << "-------------------------------------------" << endl;
 
-
-	cout << "sol_star:" << " ";
-	sol_star.print(cfl, "filename");
-	cout << "" << endl;
-	cout << "-------------------------------------------" << endl;
-
-	cout << "LB:" <<endl;
-	for (int i = 0; i < MAX_t; i++) {
-		cout << LB[i] << " ";
-	}
-	cout << "" << endl;
-	cout << "-------------------------------------------" << endl;
-
-	cout << "u_star:" << " ";
+	double distance = 100 * (1 - LB_star / z_ub_star);
+	std::cout << "distance:" << setprecision(8) << distance;
+	std::cout << "" << endl;
+	std::cout << "-------------------------------------------" << endl;
+	
+	std::cout << "u_star:" << " ";
 	for (int i = 0; i < cfl.nCustom; i++) {
-		cout << u_star[i] << " ";
+		std::cout << u_star[i] << " ";
 	}
-	cout << "" << endl;
-	cout << "-------------------End: Information printed  from main function------------------------------" << endl;
+	std::cout << "" << endl;
+	std::cout << "-------------------End: Information printed  from main function------------------------------" << endl;
 }
 
 
@@ -522,17 +623,20 @@ int main() {
 	cfldata cfl;
 	int MAX_t = 500;	// Should be [800,2000]
 	string filename;
-	cout << "which file do you want to test:" << endl;
+	std::cout << "which file do you want to test:" << endl;
 	cin >> filename;
-	cout << "How many iterations do you want to test:" << endl;
+	std::cout << "How many iterations do you want to test:" << endl;
 	cin >> MAX_t;
 
-	int number;
-	int updaterule;
-	cout << "Updatestep():" << endl;
-	cin >> number;
-	cout << "updaterule(1 or 2)" << endl;
+	int number = 1;
+	int updaterule = 1;
+	
+	std::cout << "updaterule(1 or 2)" << endl;
 	cin >> updaterule;
+	if (updaterule == 2) {
+		std::cout << "Updatestep():" << endl;
+		cin >> number;
+	}
 
 
 	bool quit = !(cfl.read(filename));  // TODO: Change to read parameter from system args[1]
@@ -542,17 +646,17 @@ int main() {
 	cflsol sol(cfl);
 
 	// cout << "-------------------Start: Information printed from main function-----------------------------" << endl;
-	cout << "Capacitated Facility Location Problem Name:" << cfl.probname << endl;
-	cout << "The number of facilities:" << cfl.nPlants << endl;
-	cout << "The number of customers:" << cfl.nCustom << endl;
+	std::cout << "Capacitated Facility Location Problem Name:" << cfl.probname << endl;
+	std::cout << "The number of facilities:" << cfl.nPlants << endl;
+	std::cout << "The number of customers:" << cfl.nCustom << endl;
 	//cout << "-------------------End: Information printed  from main function------------------------------" << endl;
 
 	// Call the Lagrangean_solver()
 	Lagrangean_solver(cfl, sol, MAX_t, number, updaterule);
 	end = clock();
 	time = (end - start) / CLOCKS_PER_SEC;
-	cout << " time: " << time << endl;
-	cout << "Click enter to quit!" << endl;
+	std::cout << " time: " << time << endl;
+	std::cout << "Click enter to quit!" << endl;
 	getchar();
 	getchar();
 }
